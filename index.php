@@ -112,17 +112,28 @@ switch ($action) {
             
                 try {
                     $conn = new PDO("mysql:host=localhost;dbname=location", "root", "");
+
+                    $currentDate = date('Y-m-d');
+                    $currentTime = date('H-i');
+
+
                     
                     // Pertama, ambil data Z_WR_MATNR dan Z_WR_MAKTX dari ZPP_RMS_IB_GR_PR
                     $stmt = $conn->prepare("SELECT Z_WR_MATNR, Z_BL_MAKETX FROM ZPP_RMS_IB_GR_PR WHERE Z_BUNDLE_NO = :bundle");
                     $stmt->bindParam(':bundle', $bundle);
                     $stmt->execute();
                     $result = $stmt->fetch(PDO::FETCH_ASSOC);
+
+                    $auto = $conn->prepare("SELECT MAX(SRLNO) AS MAX_SRLNO FROM ZPP_WR_SUBLOC_DETAILS");
+                    $auto->execute();
+                    $maxSrlnoResult = $auto->fetch(PDO::FETCH_ASSOC);
+                    $nilai = $maxSrlnoResult['MAX_SRLNO'] + 1 ;
             
                     if ($result) {
                         // Kemudian, insert data ke ZPP_WR_SUBLOC_DETAILS
-                        $insertStmt = $conn->prepare("INSERT INTO ZPP_WR_SUBLOC_DETAILS (Z_WR_MATNR, Z_WR_MAKTX, Z_BUNDLE_NO, Z_M_SUBLOC, Z_SUBLOC, Z_USR, Z_DATE, Z_TIME, Z_DEL_FLAG, Z_NOTE) VALUES (:matnr, :maktx, :bundle, :msubloc, :subloc, :usr, NOW(), NOW(), 0, 'NO_REL')");
+                        $insertStmt = $conn->prepare("INSERT INTO ZPP_WR_SUBLOC_DETAILS (MANDT, SRLNO, Z_WR_MATNR, Z_WR_MAKTX, Z_BUNDLE_NO, Z_M_SUBLOC, Z_SUBLOC, Z_USR, Z_DATE_TIME, Z_DATE, Z_TIME, Z_DEL_FLAG, Z_NOTE, Z_COLECT_ST) VALUES (600, :nilai, :matnr, :maktx, :bundle, :msubloc, :subloc, :usr, NOW(), DATE(NOW()), TIME(NOW()), 0, 'NO_REL','ONE ROW')");
                         $insertStmt->execute([
+                            ':nilai' => $nilai,
                             ':matnr' => $result['Z_WR_MATNR'],
                             ':maktx' => $result['Z_BL_MAKETX'],
                             ':bundle' => $bundle,
@@ -155,11 +166,17 @@ switch ($action) {
                     $stmt->bindParam(':bundle', $bundle);
                     $stmt->execute();
                     $result = $stmt->fetch(PDO::FETCH_ASSOC);
+
+                    $auto = $conn->prepare("SELECT MAX(SRLNO) AS MAX_SRLNO FROM ZPP_WR_SUBLOC_DETAILS");
+                    $auto->execute();
+                    $maxSrlnoResult = $auto->fetch(PDO::FETCH_ASSOC);
+                    $nilai = $maxSrlnoResult['MAX_SRLNO'] + 1 ;
             
                     if ($result) {
                         // Kemudian, insert data ke ZPP_WR_SUBLOC_DETAILS
-                        $insertStmt = $conn->prepare("INSERT INTO ZPP_WR_SUBLOC_DETAILS (Z_WR_MATNR, Z_WR_MAKTX, Z_BUNDLE_NO, Z_M_SUBLOC, Z_SUBLOC, Z_USR, Z_DATE, Z_TIME, Z_DEL_FLAG, Z_NOTE) VALUES (:matnr, :maktx, :bundle, :msubloc, :subloc, :usr, NOW(), NOW(), 0, 'NEW_REL')");
+                        $insertStmt = $conn->prepare("INSERT INTO ZPP_WR_SUBLOC_DETAILS (MANDT, SRLNO, Z_WR_MATNR, Z_WR_MAKTX, Z_BUNDLE_NO, Z_M_SUBLOC, Z_SUBLOC, Z_USR, Z_DATE_TIME, Z_DATE, Z_TIME, Z_DEL_FLAG, Z_NOTE, Z_COLECT_ST) VALUES (600, :nilai, :matnr, :maktx, :bundle, :msubloc, :subloc, :usr, NOW(), DATE(NOW()), TIME(NOW()), 0, 'NEW_REL','ONE ROW')");
                         $insertStmt->execute([
+                            ':nilai' => $nilai,
                             ':matnr' => $result['Z_WR_MATNR'],
                             ':maktx' => $result['Z_BL_MAKETX'],
                             ':bundle' => $bundle,
@@ -176,7 +193,7 @@ switch ($action) {
                     echo json_encode(["status" => false, "message" => "Database error: " . $e->getMessage()]);
                 }
                 break;
-                // Kasus baru di dalam switch case
+
                 case "insert_many_rows":
                     $mac_addr = $_REQUEST["mac_addr"];
                     $username = $_REQUEST["username"];
@@ -185,58 +202,89 @@ switch ($action) {
                     $main = $_REQUEST["main"];
                     $location = $_REQUEST["location"];
                 
-                    if (!is_numeric($bundleFrom) || !is_numeric($bundleTo) || intval($bundleFrom) > intval($bundleTo)) {
-                        echo json_encode(["status" => false, "message" => "Invalid bundle range"]);
-                        exit;
-                    }
-                
                     try {
-                        $conn->beginTransaction();
+                        $conn = new PDO("mysql:host=localhost;dbname=location", "root", "");
+                        $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
                 
-                        // Konversi bundleFrom dan bundleTo menjadi integer
-                        $bundleFromInt = intval($bundleFrom);
-                        $bundleToInt = intval($bundleTo);
+                        $stmt = $conn->prepare("SELECT Z_BUNDLE_NO, Z_WR_MATNR, Z_BL_MAKETX FROM ZPP_RMS_IB_GR_PR WHERE Z_BUNDLE_NO BETWEEN :bundleFrom AND :bundleTo");
+                        $stmt->bindParam(':bundleFrom', $bundleFrom, PDO::PARAM_STR);
+                        $stmt->bindParam(':bundleTo', $bundleTo, PDO::PARAM_STR);
+                        $stmt->execute();
+                        $bundles = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 
-                        // Periksa dulu apakah ada data yang tidak ditemukan
-                        $stmtCheck = $conn->prepare("SELECT Z_BUNDLE_NO FROM ZPP_RMS_IB_GR_PR WHERE Z_BUNDLE_NO BETWEEN :bundleFrom AND :bundleTo");
-                        $stmtCheck->execute([':bundleFrom' => $bundleFromInt, ':bundleTo' => $bundleToInt]);
-                        $foundBundles = $stmtCheck->fetchAll(PDO::FETCH_COLUMN);
-                
-                        if (count($foundBundles) < ($bundleToInt - $bundleFromInt + 1)) {
-                            // Ada bundle yang tidak ditemukan
-                            $conn->rollBack();
-                            echo json_encode(["status" => false, "message" => "Some bundles between $bundleFrom and $bundleTo were not found"]);
+                        if (!$bundles) {
+                            echo json_encode(["status" => false, "message" => "No bundles found within the specified range"]);
                             exit;
                         }
                 
-                        // Jika semua bundle ditemukan, lanjutkan dengan insert
-                        foreach ($foundBundles as $bundleNo) {
-                            $stmt = $conn->prepare("SELECT Z_WR_MATNR, Z_BL_MAKETX FROM ZPP_RMS_IB_GR_PR WHERE Z_BUNDLE_NO = :bundleNo");
-                            $stmt->bindParam(':bundleNo', $bundleNo);
-                            $stmt->execute();
-                            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+                        foreach ($bundles as $bundle) {
+                            $auto = $conn->prepare("SELECT MAX(SRLNO) AS MAX_SRLNO FROM ZPP_WR_SUBLOC_DETAILS");
+                            $auto->execute();
+                            $maxSrlnoResult = $auto->fetch(PDO::FETCH_ASSOC);
+                            $nilai = $maxSrlnoResult ? $maxSrlnoResult['MAX_SRLNO'] + 1 : 1;
                 
-                            $insertStmt = $conn->prepare("INSERT INTO ZPP_WR_SUBLOC_DETAILS (Z_WR_MATNR, Z_WR_MAKTX, Z_BUNDLE_NO, Z_M_SUBLOC, Z_SUBLOC, Z_USR, Z_DATE, Z_TIME, Z_DEL_FLAG, Z_NOTE) VALUES (:matnr, :maktx, :bundle, :msubloc, :subloc, :usr, NOW(), NOW(), 0, 'NEW_REL')");
-                            $insertStmt->execute([
-                                ':matnr' => $result['Z_WR_MATNR'],
-                                ':maktx' => $result['Z_BL_MAKETX'],
-                                ':bundle' => $bundleNo,
-                                ':msubloc' => $main,
-                                ':subloc' => $location,
-                                ':usr' => $username
-                            ]);
+                            $insertStmt = $conn->prepare("INSERT INTO ZPP_WR_SUBLOC_DETAILS (MANDT, SRLNO, Z_WR_MATNR, Z_WR_MAKTX, Z_BUNDLE_NO, Z_M_SUBLOC, Z_SUBLOC, Z_USR, Z_DATE_TIME, Z_DATE, Z_TIME, Z_DEL_FLAG, Z_NOTE, Z_COLECT_ST) VALUES (600, :nilai, :matnr, :maktx, :bundleNo, :msubloc, :subloc, :usr, NOW(), DATE(NOW()), TIME(NOW()), 0, 'NEW_REL', 'MANY ROWS')");
+                            $insertStmt->bindParam(':nilai', $nilai);
+                            $insertStmt->bindParam(':matnr', $bundle['Z_WR_MATNR'], PDO::PARAM_STR);
+                            $insertStmt->bindParam(':maktx', $bundle['Z_BL_MAKETX'], PDO::PARAM_STR);
+                            $insertStmt->bindParam(':bundleNo', $bundle['Z_BUNDLE_NO'], PDO::PARAM_STR);
+                            $insertStmt->bindParam(':msubloc', $main);
+                            $insertStmt->bindParam(':subloc', $location);
+                            $insertStmt->bindParam(':usr', $username);
+                            $insertStmt->execute();
                         }
                 
-                        $conn->commit();
-                        echo json_encode(["status" => true, "message" => "Data inserted successfully for bundles from $bundleFrom to $bundleTo"]);
+                        echo json_encode(["status" => true, "message" => "Data inserted successfully for all bundles"]);
                     } catch (PDOException $e) {
-                        $conn->rollBack();
                         echo json_encode(["status" => false, "message" => "Database error: " . $e->getMessage()]);
                     }
+                    break;   
+                    
+                    case "insertre_many_rows":
+                        $mac_addr = $_REQUEST["mac_addr"];
+                        $username = $_REQUEST["username"];
+                        $bundleFrom = $_REQUEST["bundle_from"];
+                        $bundleTo = $_REQUEST["bundle_to"];
+                        $main = $_REQUEST["main"];
+                        $location = $_REQUEST["location"];
+                    
+                        try {
+                            $conn = new PDO("mysql:host=localhost;dbname=location", "root", "");
+                            $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+                    
+                            $stmt = $conn->prepare("SELECT Z_BUNDLE_NO, Z_WR_MATNR, Z_BL_MAKETX FROM ZPP_RMS_IB_GR_PR WHERE Z_BUNDLE_NO BETWEEN :bundleFrom AND :bundleTo");
+                            $stmt->bindParam(':bundleFrom', $bundleFrom, PDO::PARAM_STR);
+                            $stmt->bindParam(':bundleTo', $bundleTo, PDO::PARAM_STR);
+                            $stmt->execute();
+                            $bundles = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                    
+                            if (!$bundles) {
+                                echo json_encode(["status" => false, "message" => "No bundles found within the specified range"]);
+                                exit;
+                            }
+                    
+                            foreach ($bundles as $bundle) {
+                                $auto = $conn->prepare("SELECT MAX(SRLNO) AS MAX_SRLNO FROM ZPP_WR_SUBLOC_DETAILS");
+                                $auto->execute();
+                                $maxSrlnoResult = $auto->fetch(PDO::FETCH_ASSOC);
+                                $nilai = $maxSrlnoResult ? $maxSrlnoResult['MAX_SRLNO'] + 1 : 1;
+                    
+                                $insertStmt = $conn->prepare("INSERT INTO ZPP_WR_SUBLOC_DETAILS (MANDT, SRLNO, Z_WR_MATNR, Z_WR_MAKTX, Z_BUNDLE_NO, Z_M_SUBLOC, Z_SUBLOC, Z_USR, Z_DATE_TIME, Z_DATE, Z_TIME, Z_DEL_FLAG, Z_NOTE, Z_COLECT_ST) VALUES (600, :nilai, :matnr, :maktx, :bundleNo, :msubloc, :subloc, :usr, NOW(), DATE(NOW()), TIME(NOW()), 0, 'NEW_REL', 'MANY ROWS')");
+                                $insertStmt->bindParam(':nilai', $nilai);
+                                $insertStmt->bindParam(':matnr', $bundle['Z_WR_MATNR'], PDO::PARAM_STR);
+                                $insertStmt->bindParam(':maktx', $bundle['Z_BL_MAKETX'], PDO::PARAM_STR);
+                                $insertStmt->bindParam(':bundleNo', $bundle['Z_BUNDLE_NO'], PDO::PARAM_STR);
+                                $insertStmt->bindParam(':msubloc', $main);
+                                $insertStmt->bindParam(':subloc', $location);
+                                $insertStmt->bindParam(':usr', $username);
+                                $insertStmt->execute();
+                            }
+                    
+                            echo json_encode(["status" => true, "message" => "Data inserted successfully for all bundles"]);
+                        } catch (PDOException $e) {
+                            echo json_encode(["status" => false, "message" => "Database error: " . $e->getMessage()]);
+                        }
+                        break;        
                 
-                    break;
-                
-                
-       
 }
 ?>
